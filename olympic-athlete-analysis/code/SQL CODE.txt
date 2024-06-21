@@ -1,0 +1,239 @@
+#### Create schema, fact and dimension Tables #####
+
+-- SCHEMA: public
+
+-- DROP SCHEMA IF EXISTS public ;
+
+CREATE SCHEMA IF NOT EXISTS public
+    AUTHORIZATION postgres;
+
+COMMENT ON SCHEMA public
+    IS 'standard public schema';
+
+GRANT ALL ON SCHEMA public TO PUBLIC;
+
+GRANT ALL ON SCHEMA public TO postgres;
+
+CREATE TABLE dimAthlete(
+    athlete_id INT PRIMARY KEY,
+    Athlete_name VARCHAR(255),
+    gender VARCHAR(255)
+);
+
+CREATE TABLE dimAthlete_Country (
+    athlete_countryCode CHAR(255) PRIMARY KEY,
+    Country_name VARCHAR(255),
+    Continent VARCHAR(255)
+);
+
+CREATE TABLE dimGame (
+    game_id VARCHAR(255) PRIMARY KEY,
+    game_name VARCHAR(255),
+    gameLocation VARCHAR(255)
+);
+
+CREATE TABLE dimYear (
+    year_id INT PRIMARY KEY,
+    Year INT,
+    season VARCHAR(255)
+);
+
+CREATE TABLE dimEvent (
+    event_id INT PRIMARY KEY,
+    title VARCHAR(255),
+    event_gender CHAR(255),
+    discipline VARCHAR(255)
+);
+
+CREATE TABLE dimMedal (
+    medal_id INT PRIMARY KEY,
+    medal_type VARCHAR(255)
+);
+
+CREATE TABLE dimEconomy (
+    economy_id VARCHAR(255) PRIMARY KEY,
+    Health_Expenditure FLOAT(30),
+    GDP_perCapita FLOAT(30)
+);
+
+CREATE TABLE fact_OlympicAthletes (
+    record_id SERIAL PRIMARY KEY,
+    athlete_id INT REFERENCES dimAthlete (athlete_id),
+    athlete_countryCode CHAR(255) REFERENCES dimAthlete_Country (athlete_countryCode),
+    event_id INT REFERENCES dimEvent (event_id),
+    medal_id INT REFERENCES dimMedal (Medal_id),
+    game_id VARCHAR(255) REFERENCES dimGame (game_id),
+    year_id INT REFERENCES dimYear (year_id),
+    economy_id VARCHAR(255) REFERENCES dimEconomy (economy_id)
+);
+
+
+#### Add a measure column: 'gold_medals', 'silver_medals', 'bronze_medals' in the fact table ####
+
+ALTER TABLE fact_olympicathletes ADD COLUMN gold_medals INT DEFAULT 0;
+ALTER TABLE fact_olympicathletes ADD COLUMN silver_medals INT DEFAULT 0;
+ALTER TABLE fact_olympicathletes ADD COLUMN bronze_medals INT DEFAULT 0;
+
+UPDATE fact_olympicathletes
+SET gold_medals = CASE WHEN medal_id = 1 THEN 1 ELSE 0 END,
+    silver_medals = CASE WHEN medal_id = 2 THEN 1 ELSE 0 END,
+    bronze_medals = CASE WHEN medal_id = 3 THEN 1 ELSE 0 END;
+
+
+
+#### QUERIES; ####
+
+#1. Highest Medals Won by Game
+	SELECT g.game_name,
+		COUNT(*) AS total_medals
+	FROM fact_olympicathletes f
+	JOIN
+		dimevent e ON f.event_id = e.event_id
+	JOIN
+		dimmedal m ON f.medal_id = m.medal_id
+	JOIN
+		dimgame g ON f.game_id = g.game_id
+	GROUP BY CUBE(g.game_name, e.title)
+	ORDER BY total_medals DESC
+	LIMIT 10;
+
+	# 1.1: Highest Medals Won by Game Group by medal type
+	SELECT
+		g.game_name,
+		COUNT(*) FILTER (WHERE m.medal_type = 'GOLD') AS Total_gold_Medals,
+		COUNT(*) FILTER (WHERE m.medal_type = 'SILVER') AS Total_Silver_Medals,
+		COUNT(*) FILTER (WHERE m.medal_type = 'BRONZE') AS Total_Bronze_Medals
+	FROM
+		fact_olympicathletes f
+	JOIN
+		dimevent e ON f.event_id = e.event_id
+	JOIN
+		dimmedal m ON f.medal_id = m.medal_id
+	JOIN
+		dimgame g ON f.game_id = g.game_id
+	GROUP BY
+		CUBE(g.game_name, e.title)
+	ORDER BY
+		total_gold_medals DESC,
+		total_silver_medals DESC,
+		total_bronze_medals DESC
+LIMIT 10;
+
+
+# 2. correlation between gdp and total medlas won:
+	SELECT
+		ac.country_name,
+		SUM(fa.gold_medals) AS gold_medals,
+		SUM(fa.silver_medals) AS silver_medals,
+		SUM(fa.bronze_medals) AS bronze_medals,
+		econ.gdp_percapita
+	FROM
+		fact_olympicathletes fa
+	JOIN
+		dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+	JOIN
+		dimmedal m ON fa.medal_id = m.medal_id
+	JOIN
+		dimeconomy econ ON fa.economy_id = econ.economy_id
+	WHERE econ.gdp_percapita > 0
+	GROUP BY
+		ac.country_name, econ.gdp_percapita
+	ORDER BY
+		gold_medals DESC, silver_medals DESC, bronze_medals DESC, gdp_percapita
+	;
+
+	# 2.1 :
+	SELECT
+		ac.country_name,
+		SUM(fa.gold_medals + fa.silver_medals + fa.bronze_medals) AS total_medals,
+		econ.gdp_percapita
+	FROM
+		fact_olympicathletes fa
+	JOIN
+		dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+	JOIN
+		dimeconomy econ ON fa.economy_id = econ.economy_id
+	WHERE econ.gdp_percapita > 0
+	GROUP BY
+		ac.country_name, econ.gdp_percapita
+	ORDER BY
+		econ.gdp_percapita DESC;
+
+
+# 3. Which Host country had most number of athlete participants:
+	SELECT 
+		g.gamelocation AS host_country, 
+		COUNT(DISTINCT f.athlete_id) AS number_of_athletes
+	FROM 
+		fact_olympicathletes f
+	JOIN 
+		dimgame g ON f.game_id = g.game_id
+	GROUP BY 
+		g.gamelocation
+	ORDER BY 
+		number_of_athletes DESC
+
+
+# 4. Trend in medal count for previous 10 games for continent = Asia:
+	WITH MedalCounts AS (
+		SELECT
+			ac.continent,
+			y.year,
+			COUNT(*) AS total_medals
+		FROM
+			fact_olympicathletes fa
+		JOIN dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+		JOIN dimyear y ON fa.year_id = y.year_id
+		JOIN dimgame g ON fa.game_id = g.game_id
+		WHERE
+			ac.continent = 'Asia' AND
+			 y.year >= 10
+		GROUP BY
+			ac.continent, y.year
+	)
+	SELECT
+		year,
+		total_medals
+	FROM
+		MedalCounts
+	WHERE year >= 2022 - 19  /* get previous 10 games */ 
+	ORDER BY
+		year;
+
+ORRR
+
+SELECT DISTINCT y.year, COUNT(*) AS total_medals
+FROM
+    fact_olympicathletes fa
+JOIN dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+JOIN dimyear y ON fa.year_id = y.year_id
+WHERE
+    ac.continent = 'Asia' and 
+	y.year >= 2022 -19 /* get only last 10 games*/
+GROUP BY ROLLUP (y.year, ac.continent)
+ORDER BY
+    y.year;
+
+
+
+# 5. TREND IN MEDAL COUNT BY SEASONS :
+
+#5.1 FILTER BY LAST 10 GAMES
+	SELECT DISTINCT dy.season, dy.year, COUNT(*) AS total_medals
+	FROM fact_olympicathletes fa
+	JOIN dimyear dy ON fa.year_id = dy.year_id
+	JOIN dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+	WHERE ac.continent = 'Asia' AND
+		dy.year >= 2022 -19 /* get only last 10 games*/
+	GROUP BY ROLLUP(dy.season, dy.year, ac.continent)
+	ORDER BY dy.year ASC;
+	
+# 5.2 filter wihthout last 10 games
+	SELECT DISTINCT dy.season, dy.year, COUNT(*) AS total_medals
+	FROM fact_olympicathletes fa
+	JOIN dimyear dy ON fa.year_id = dy.year_id
+	JOIN dimathlete_country ac ON fa.athlete_countrycode = ac.athlete_countrycode
+	WHERE ac.continent = 'Asia'
+	GROUP BY ROLLUP(dy.season, dy.year, ac.continent)
+	ORDER BY dy.year ASC;
+
