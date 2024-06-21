@@ -20,13 +20,7 @@ Five different Poisson models were fitted and compared:
 4. Zero-Inflated Poisson Regression (ZIPR) Model
 5. Zero-Inflated Negative Binomial (ZINB) Model
 
-Models were evaluated using AIC, dispersion tests, rootograms, and Pearson's Residual Plots.
-
-## Key Findings
-- The Zero-Inflated Negative Binomial (ZINB) Model emerged as the best fit.
-- Number of patient visits significantly increased complaints.
-- More working hours and higher revenue were associated with fewer complaints.
-- Gender and revenue were not statistically significant factors.
+Models were evaluated using AIC, dispersion tests, rootograms, and Pearson's Residual Plots. For more detailed information and analysis refer to the report `doctors_complaint_analysis.pdf`.
 
 ## Files
 - `doctors_complaint_analysis.pdf`: Full report including methodology, results, discussion, and code appendix
